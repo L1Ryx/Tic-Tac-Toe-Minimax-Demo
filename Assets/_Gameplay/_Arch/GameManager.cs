@@ -8,6 +8,12 @@ public class GameManager : MonoBehaviour
 {
     public TMP_Text statusText;
     public TMP_Text resetText;
+    public TMP_Text tutorialText; 
+    private int currentLevel = 1;
+    private int maxLevel = 2; // Number of levels you have
+
+    private bool playerWon = false; // Track if the player won to allow ENTER
+
     [SerializeField] private string resetPromptText = "Press SPACE to Reset"; // Editable prompt text
     private bool gameEnded = false; // Flag to know if game is over
     private Coroutine resetFadeCoroutine;
@@ -34,20 +40,68 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        board = new int[9];
-
         for (int i = 0; i < buttons.Length; i++)
         {
             int index = i;
             buttons[i].onClick.AddListener(() => PlayerMove(index));
         }
 
-        statusText.text = yourTurnText;
+        InitializeGame(); // <- clean initialization
     }
+    
+    void InitializeGame()
+    {
+        Debug.Log($"Initializing Level {currentLevel}");
+
+        // Reset board state
+        board = new int[9];
+
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            var colors = buttons[i].colors;
+            colors.normalColor = Color.white;
+            colors.disabledColor = Color.white;
+            colors.highlightedColor = Color.white;
+            colors.pressedColor = Color.white;
+            buttons[i].colors = colors;
+
+            buttons[i].interactable = true;
+        }
+
+        playerTurn = true;
+        gameEnded = false;
+        playerWon = false;
+
+        // Reset status text
+        statusText.text = yourTurnText;
+        Color statusColor = Color.white;
+        statusColor.a = 1f;
+        statusText.color = statusColor;
+
+        // Clear tutorial text (optional)
+        if (tutorialText != null)
+        {
+            tutorialText.gameObject.SetActive(true);
+        }
+
+        // Clear reset text and stop fade
+        if (resetFadeCoroutine != null)
+        {
+            StopCoroutine(resetFadeCoroutine);
+        }
+        resetText.text = "";
+        Color resetColor = resetText.color;
+        resetColor.a = 1f;
+        resetText.color = resetColor;
+    }
+
 
     void PlayerMove(int index)
     {
         if (!playerTurn || board[index] != 0) return;
+
+        HideTutorialIfVisible();
+
 
         board[index] = 1;
         UpdateButton(index, 1);
@@ -59,6 +113,7 @@ public class GameManager : MonoBehaviour
             StartCoroutine(LerpTextColor(playerWinColor));
             Debug.Log("Player Wins!");
             DisableAllButtons();
+            playerWon = true; // <- Mark that player won
             return;
         }
 
@@ -72,7 +127,15 @@ public class GameManager : MonoBehaviour
         }
 
         statusText.text = enemyTurnText;
-        Invoke(nameof(AIMove), enemyMoveDelay); // <<<<< DELAYED enemy move
+        Invoke(nameof(AIMove), enemyMoveDelay);
+    }
+
+    void HideTutorialIfVisible()
+    {
+        if (tutorialText != null && tutorialText.gameObject.activeSelf)
+        {
+            tutorialText.gameObject.SetActive(false);
+        }
     }
 
 
@@ -80,23 +143,21 @@ public class GameManager : MonoBehaviour
 
     void AIMove()
     {
-        List<int> availableIndices = new List<int>();
+        int moveIndex = -1;
 
-        // Find all available squares
-        for (int i = 0; i < board.Length; i++)
+        if (currentLevel == 1)
         {
-            if (board[i] == 0)
-            {
-                availableIndices.Add(i);
-            }
+            moveIndex = GetRandomMove();
+        }
+        else if (currentLevel == 2)
+        {
+            moveIndex = GetMinimaxMove(depth: 2);
         }
 
-        if (availableIndices.Count > 0)
+        if (moveIndex != -1)
         {
-            // Pick a random available square
-            int randomIndex = availableIndices[Random.Range(0, availableIndices.Count)];
-            board[randomIndex] = 2;
-            UpdateButton(randomIndex, 2);
+            board[moveIndex] = 2;
+            UpdateButton(moveIndex, 2);
         }
 
         if (CheckWin(2))
@@ -119,6 +180,96 @@ public class GameManager : MonoBehaviour
         playerTurn = true;
         statusText.text = yourTurnText;
     }
+
+
+    int GetRandomMove()
+    {
+        List<int> availableIndices = new List<int>();
+
+        for (int i = 0; i < board.Length; i++)
+        {
+            if (board[i] == 0)
+            {
+                availableIndices.Add(i);
+            }
+        }
+
+        if (availableIndices.Count == 0)
+            return -1; // No moves left (shouldn't happen, but safety check)
+
+        return availableIndices[Random.Range(0, availableIndices.Count)];
+    }
+    
+    int GetMinimaxMove(int depth)
+    {
+        int bestScore = int.MinValue;
+        int bestMove = -1;
+
+        for (int i = 0; i < board.Length; i++)
+        {
+            if (board[i] == 0)
+            {
+                board[i] = 2; // AI move
+                int score = Minimax(depth - 1, false);
+                board[i] = 0; // Undo move
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestMove = i;
+                }
+            }
+        }
+
+        return bestMove;
+    }
+
+    int Minimax(int depth, bool isMaximizing)
+    {
+        if (CheckWin(2))
+            return 10;
+        else if (CheckWin(1))
+            return -10;
+        else if (CheckTie())
+            return 0;
+
+        if (depth == 0)
+            return 0; // Depth limit reached — treat as neutral
+
+        if (isMaximizing)
+        {
+            int bestScore = int.MinValue;
+
+            for (int i = 0; i < board.Length; i++)
+            {
+                if (board[i] == 0)
+                {
+                    board[i] = 2; // AI move
+                    int score = Minimax(depth - 1, false);
+                    board[i] = 0; // Undo move
+                    bestScore = Mathf.Max(score, bestScore);
+                }
+            }
+            return bestScore;
+        }
+        else
+        {
+            int bestScore = int.MaxValue;
+
+            for (int i = 0; i < board.Length; i++)
+            {
+                if (board[i] == 0)
+                {
+                    board[i] = 1; // Player move
+                    int score = Minimax(depth - 1, true);
+                    board[i] = 0; // Undo move
+                    bestScore = Mathf.Min(score, bestScore);
+                }
+            }
+            return bestScore;
+        }
+    }
+
 
 
     IEnumerator LerpTextColor(Color targetColor)
@@ -200,11 +351,32 @@ public class GameManager : MonoBehaviour
 
     void Update()
     {
-        if (gameEnded && Input.GetKeyDown(KeyCode.Space))
+        if (gameEnded)
         {
-            ResetGame();
+            if (playerWon && Input.GetKeyDown(KeyCode.Return)) // ENTER key
+            {
+                MoveToNextLevel();
+            }
+            else if (Input.GetKeyDown(KeyCode.Space)) // SPACE key
+            {
+                ResetGame();
+            }
         }
     }
+    
+    void MoveToNextLevel()
+    {
+        currentLevel++;
+
+        if (currentLevel > maxLevel)
+        {
+            currentLevel = 1; // Restart at Level 1
+        }
+
+        InitializeGame();
+    }
+
+
     
     IEnumerator FadeInResetText()
     {
@@ -251,39 +423,7 @@ public class GameManager : MonoBehaviour
 
     void ResetGame()
     {
-        for (int i = 0; i < board.Length; i++)
-        {
-            board[i] = 0;
-        }
-
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            var colors = buttons[i].colors;
-            colors.normalColor = Color.white;
-            colors.disabledColor = Color.white;
-            colors.highlightedColor = Color.white;
-            colors.pressedColor = Color.white;
-            buttons[i].colors = colors;
-
-            buttons[i].interactable = true;
-        }
-
-        playerTurn = true;
-
-        // Reset Status Text
-        statusText.text = yourTurnText;
-        Color statusColor = Color.white;
-        statusColor.a = 1f;
-        statusText.color = statusColor;
-
-        // Fade out Reset Text
-        if (resetFadeCoroutine != null)
-        {
-            StopCoroutine(resetFadeCoroutine);
-        }
-        resetFadeCoroutine = StartCoroutine(FadeOutResetText());
-
-        gameEnded = false;
+        InitializeGame();
     }
 
 
