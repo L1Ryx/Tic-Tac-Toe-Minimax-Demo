@@ -6,13 +6,22 @@ using TMPro;
 
 public class GameManager : MonoBehaviour
 {
+    [Header("Text Refs")]
     public TMP_Text statusText;
     public TMP_Text resetText;
     public TMP_Text tutorialText; 
+    public TMP_Text thinkingText; 
+    public TMP_Text levelHeaderText; 
+    public TMP_Text nextText; 
+    private Coroutine nextFadeCoroutine; // To control fade in/out
+
+
+
     private int currentLevel = 1;
     private int maxLevel = 2; // Number of levels you have
 
     private bool playerWon = false; // Track if the player won to allow ENTER
+    private List<string> aiLogs = new List<string>();
 
     [SerializeField] private string resetPromptText = "Press SPACE to Reset"; // Editable prompt text
     private bool gameEnded = false; // Flag to know if game is over
@@ -52,6 +61,7 @@ public class GameManager : MonoBehaviour
     void InitializeGame()
     {
         Debug.Log($"Initializing Level {currentLevel}");
+        
 
         // Reset board state
         board = new int[9];
@@ -77,6 +87,21 @@ public class GameManager : MonoBehaviour
         Color statusColor = Color.white;
         statusColor.a = 1f;
         statusText.color = statusColor;
+        thinkingText.text = "";
+        UpdateLevelHeader();
+        // Clear Next Text
+        nextText.text = "";
+        if (nextFadeCoroutine != null)
+        {
+            StopCoroutine(nextFadeCoroutine);
+            nextFadeCoroutine = null;
+        }
+        Color nextColor = nextText.color;
+        nextColor.a = 1f; // Reset alpha to visible fully
+        nextText.color = nextColor;
+
+
+
 
         // Clear tutorial text (optional)
         if (tutorialText != null)
@@ -94,6 +119,23 @@ public class GameManager : MonoBehaviour
         resetColor.a = 1f;
         resetText.color = resetColor;
     }
+    
+    void UpdateLevelHeader()
+    {
+        switch (currentLevel)
+        {
+            case 1:
+                levelHeaderText.text = "Tic-Tac-Toe v.s. Enemy Using Random Choice";
+                break;
+            case 2:
+                levelHeaderText.text = "Tic-Tac-Toe v.s. Enemy Using Minimax (Depth = 2)";
+                break;
+            default:
+                levelHeaderText.text = $"Tic-Tac-Toe v.s. Enemy (Level {currentLevel})";
+                break;
+        }
+    }
+
 
 
     void PlayerMove(int index)
@@ -114,8 +156,17 @@ public class GameManager : MonoBehaviour
             Debug.Log("Player Wins!");
             DisableAllButtons();
             playerWon = true; // <- Mark that player won
+            if (nextFadeCoroutine != null)
+            {
+                StopCoroutine(nextFadeCoroutine);
+            }
+            nextText.text = "Press ENTER to Face Next Enemy";
+            nextFadeCoroutine = StartCoroutine(FadeInNextText());
             return;
         }
+        
+
+
 
 
         if (CheckTie())
@@ -202,29 +253,68 @@ public class GameManager : MonoBehaviour
     
     int GetMinimaxMove(int depth)
     {
+        aiLogs.Clear();
+        aiLogs.Add($"Starting Minimax thinking at Level {currentLevel} with depth {depth}");
+
         int bestScore = int.MinValue;
         int bestMove = -1;
+        List<int> bestMoves = new List<int>(); // To track moves tied for best
 
         for (int i = 0; i < board.Length; i++)
         {
             if (board[i] == 0)
             {
                 board[i] = 2; // AI move
-                int score = Minimax(depth - 1, false);
+                int score = Minimax(depth - 1, false, 2);
                 board[i] = 0; // Undo move
+
+                aiLogs.Add($"Considering move at square {i}: resulting score {score}");
 
                 if (score > bestScore)
                 {
                     bestScore = score;
                     bestMove = i;
+
+                    bestMoves.Clear();
+                    bestMoves.Add(i);
+                }
+                else if (score == bestScore)
+                {
+                    bestMoves.Add(i);
                 }
             }
         }
 
+        if (bestMove != -1)
+        {
+            if (bestMoves.Count > 1)
+            {
+                aiLogs.Add($"Enemy chooses square {bestMove} because resulting score {bestScore} is one of the highest.");
+            }
+            else
+            {
+                aiLogs.Add($"Enemy chooses square {bestMove} because resulting score {bestScore} is highest.");
+            }
+        }
+        else
+        {
+            aiLogs.Add("No valid move found.");
+        }
+
+        foreach (string log in aiLogs)
+        {
+            Debug.Log(log);
+        }
+
+        thinkingText.text = string.Join("\n->\n", aiLogs);
+
         return bestMove;
+
     }
 
-    int Minimax(int depth, bool isMaximizing)
+
+
+    int Minimax(int depth, bool isMaximizing, int currentPlayer)
     {
         if (CheckWin(2))
             return 10;
@@ -234,7 +324,7 @@ public class GameManager : MonoBehaviour
             return 0;
 
         if (depth == 0)
-            return 0; // Depth limit reached — treat as neutral
+            return 0; // Depth limit reached
 
         if (isMaximizing)
         {
@@ -245,8 +335,9 @@ public class GameManager : MonoBehaviour
                 if (board[i] == 0)
                 {
                     board[i] = 2; // AI move
-                    int score = Minimax(depth - 1, false);
-                    board[i] = 0; // Undo move
+                    int score = Minimax(depth - 1, false, 2);
+                    board[i] = 0;
+
                     bestScore = Mathf.Max(score, bestScore);
                 }
             }
@@ -261,14 +352,17 @@ public class GameManager : MonoBehaviour
                 if (board[i] == 0)
                 {
                     board[i] = 1; // Player move
-                    int score = Minimax(depth - 1, true);
-                    board[i] = 0; // Undo move
+                    int score = Minimax(depth - 1, true, 1);
+                    board[i] = 0;
+
                     bestScore = Mathf.Min(score, bestScore);
                 }
             }
             return bestScore;
         }
     }
+
+
 
 
 
@@ -285,6 +379,49 @@ public class GameManager : MonoBehaviour
         }
 
         statusText.color = targetColor; // Ensure exact final color
+    }
+
+    IEnumerator FadeInNextText()
+    {
+        Color color = nextText.color;
+        color.a = 0f;
+        nextText.color = color;
+
+        float elapsed = 0f;
+        while (elapsed < resetFadeDuration) // reuse resetFadeDuration
+        {
+            float t = elapsed / resetFadeDuration;
+            color.a = Mathf.Lerp(0f, 1f, t);
+            nextText.color = color;
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        color.a = 1f;
+        nextText.color = color;
+    }
+
+    IEnumerator FadeOutNextText()
+    {
+        Color color = nextText.color;
+        color.a = 1f;
+        nextText.color = color;
+
+        float elapsed = 0f;
+        while (elapsed < resetFadeDuration) // reuse resetFadeDuration
+        {
+            float t = elapsed / resetFadeDuration;
+            color.a = Mathf.Lerp(1f, 0f, t);
+            nextText.color = color;
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        color.a = 0f;
+        nextText.color = color;
+        nextText.text = ""; // Clear after fade out
     }
 
 
@@ -368,10 +505,12 @@ public class GameManager : MonoBehaviour
     {
         currentLevel++;
 
-        if (currentLevel > maxLevel)
+        if (nextFadeCoroutine != null)
         {
-            currentLevel = 1; // Restart at Level 1
+            StopCoroutine(nextFadeCoroutine);
         }
+        nextFadeCoroutine = StartCoroutine(FadeOutNextText());
+
 
         InitializeGame();
     }
